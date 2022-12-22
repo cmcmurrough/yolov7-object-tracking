@@ -23,8 +23,243 @@ from utils.download_weights import download
 import skimage
 from sort import *
 
-#............................... Bounding Boxes Drawing ............................
-"""Function to Draw Bounding boxes"""
+from datetime import datetime
+from utils.datasets import letterbox
+
+# wrapper class for YOLOv7 object tracking implementation by RizwanMunawar
+# original repository: https://github.com/RizwanMunawar/yolov7-object-tracking
+class YOLOv7:
+    def __init__(self):
+        self.source = arguments.source
+        self.weights = arguments.weights
+        self.view_img = arguments.view_img
+        self.save_txt = arguments.save_txt
+        self.imgsz = arguments.img_size
+        self.trace = not arguments.no_trace
+        self.colored_trk = arguments.colored_trk
+        self.save_bbox_dim = arguments.save_bbox_dim
+        self.save_with_object_id = arguments.save_with_object_id
+        self.device = None
+        self.stride = None
+        self.half = False
+        self.model = None
+        self.modelc = None
+        self.classify = False
+        self.names = None
+        self.dataset = None
+
+        # set True to speedup constant image size inference
+        cudnn.benchmark = False
+
+        # initialize SORT
+        sort_max_age = 5 
+        sort_min_hits = 2
+        sort_iou_thresh = 0.2
+        self.sort_tracker = Sort(max_age=sort_max_age, min_hits=sort_min_hits, iou_threshold=sort_iou_thresh)
+
+        # create a random color list
+        self.rand_color_list = []
+        for i in range(0,5005):
+            r = randint(0, 255)
+            g = randint(0, 255)
+            b = randint(0, 255)
+            rand_color = (r, g, b)
+            self.rand_color_list.append(rand_color)
+
+        # initialize CPU/GPU device settings
+        self.device = select_device(arguments.device)
+        self.half = self.device.type != 'cpu'  # half precision only supported on CUDA
+
+        # load model
+        self.model = attempt_load(self.weights, map_location=self.device)  # load FP32 model
+        self.stride = int(self.model.stride.max())  # model stride
+        self.imgsz = check_img_size(self.imgsz, s=self.stride)  # check img_size
+
+        if self.trace:
+            self.model = TracedModel(self.model, self.device, arguments.img_size)
+        if self.half:
+            self.model.half()  # to FP16
+
+        # second-stage classifier
+        self.classify = False
+        if self.classify:
+            self.modelc = load_classifier(name='resnet101', n=2)
+            self.modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=self.device)['model']).to(self.device).eval()
+
+        # Get names and colors
+        self.names = self.model.module.names if hasattr(self.model, 'module') else self.model.names
+        self.colors = [[random.randint(0, 255) for _ in range(3)] for _ in self.names]
+
+    # generate a dataset object from a single input image
+    def __make_dataset(self, arguments, image):
+        img0 = image
+        img = letterbox(img0, self.imgsz, stride=self.stride)[0]
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img = np.ascontiguousarray(img)
+        vid_cap = False
+        path = os.getcwd()
+        return [(path, img, img0, vid_cap)]
+
+
+    # perform one cycle of inference, non-maxima supression, and SORT tracking
+    def detect(self, arguments, image):
+
+        # Run inference
+        if self.device.type != 'cpu':
+            self.model(torch.zeros(1, 3, self.imgsz, self.imgsz).to(self.device).type_as(next(self.model.parameters())))
+        old_img_w = old_img_h = self.imgsz
+        old_img_b = 1
+
+        # create a dataset from the input image
+        self.dataset = self.__make_dataset(arguments, image)
+        mode = "image"
+
+        # process each image in the dataset
+        for path, img, im0s, vid_cap, in self.dataset:
+            img = torch.from_numpy(img).to(self.device)
+            img = img.half() if self.half else img.float()  # uint8 to fp16/32
+            img /= 255.0  # 0 - 255 to 0.0 - 1.0
+            if img.ndimension() == 3:
+                img = img.unsqueeze(0)
+
+            # warmup
+            if self.device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+                old_img_b = img.shape[0]
+                old_img_h = img.shape[2]
+                old_img_w = img.shape[3]
+                for i in range(3):
+                    self.model(img, augment=arguments.augment)[0]
+
+            # perform the inference
+            pred = self.model(img, augment=arguments.augment)[0]
+
+            # apply NMS
+            pred = non_max_suppression(pred, arguments.conf_thres, arguments.iou_thres, classes=arguments.classes, agnostic=arguments.agnostic_nms)
+
+            # apply classifier
+            if self.classify:
+                pred = apply_classifier(pred, self.modelc, img, im0s)
+
+            # process detections
+            for i, det in enumerate(pred):  # detections per image
+                im0 = im0s
+                if len(det):
+                    # rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                    
+                    # run SORT
+                    dets_to_sort = np.empty((0,6))
+                    for x1, y1, x2, y2, conf, detclass in det.cpu().detach().numpy():
+                        dets_to_sort = np.vstack((dets_to_sort, np.array([x1, y1, x2, y2, conf, detclass])))
+                    tracked_dets = self.sort_tracker.update(dets_to_sort)
+                    tracks = self.sort_tracker.getTrackers()
+
+                    # annotate tracking results
+                    for track in tracks:
+                        if self.colored_trk:
+                            # draw multicolored tracks
+                            [cv2.line(im0, (int(track.centroidarr[i][0]),
+                                        int(track.centroidarr[i][1])), 
+                                        (int(track.centroidarr[i + 1][0]),
+                                        int(track.centroidarr[i + 1][1])),
+                                        self.rand_color_list[track.id], thickness=2) 
+                                        for i, _ in  enumerate(track.centroidarr) 
+                                        if i < len(track.centroidarr)-1 ] 
+                        else:
+                            # draw unicolor tracks
+                            [cv2.line(im0, (int(track.centroidarr[i][0]),
+                                        int(track.centroidarr[i][1])), 
+                                        (int(track.centroidarr[i + 1][0]),
+                                        int(track.centroidarr[i + 1][1])),
+                                        (255,0,0), thickness=2) 
+                                        for i, _ in  enumerate(track.centroidarr) 
+                                        if i < len(track.centroidarr)-1 ] 
+
+                    # draw boxes for visualization
+                    if len(tracked_dets) > 0:
+                        bbox_xyxy = tracked_dets[:, :4]
+                        identities = tracked_dets[:, 8]
+                        categories = tracked_dets[:, 4]
+                        draw_boxes(im0, bbox_xyxy, identities, categories, self.names, self.save_with_object_id)
+
+        # generate result json
+        inferences = []
+        for i, box in enumerate(bbox_xyxy):
+            x1, y1, x2, y2 = [int(i) for i in box]
+            id = int(identities[i]) if identities is not None else 0
+            class_id = int(categories[i]) if categories is not None else 0
+            class_name = self.names[class_id]
+            centroid = (int((box[0] + box[2]) / 2), (int((box[1] + box[3]) / 2)))
+            label = str(id) + ":" + class_name
+            inference = {'x1': int(x1), 'y1': int(y1), 'x2': int(x2), 'y2': int(y2), 'cx': int(centroid[0]), 'cy': int(centroid[1]), 'class_id': int(class_id), 'class_name': class_name, 'instance_id': int(id), 'label': label}
+            inferences.append(inference)
+
+        # return the resulta
+        result_image = im0
+        return result_image, inferences
+
+
+# imports for RESTful server API
+from flask import Flask, request, Response, jsonify
+api = Flask(__name__)
+
+# handler function for processing HTTP POST requests containing a single encoded image
+# response will contain detection results in JSON
+@api.route('/api/test_single_image_post', methods=['POST'])
+def test_single_image_post():
+    # convert string request data to uint8 and decode to image
+    image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
+
+    # run detection algorithm
+    print("Detection started at: UTC " + str(datetime.utcnow()))
+    start_time = datetime.now()
+    result_image, inferences_json = yolo.detect(arguments, image)
+    end_time = datetime.now()
+    elapsed_time = end_time - start_time
+    print("Detection completed in: " + str(elapsed_time.total_seconds()) + " seconds")
+
+    # create the response and send to client
+    response = {'processing_time': str(elapsed_time.total_seconds()), 'inferences': inferences_json}
+    return jsonify(response)
+
+# handler function for processing HTTP POST requests containing a single encoded image
+# response will contain detection results in a single encoded image
+@api.route('/api/detect_and_track_with_annotate', methods=['POST'])
+def detect_and_track_with_annotate():
+    # convert string request data to uint8 and decode to image
+    image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
+
+    # run detection algorithm
+    print("Detection started at: UTC " + str(datetime.utcnow()))
+    start_time = datetime.now()
+    result_image, inferences_json = yolo.detect(arguments, image)
+    end_time = datetime.now()
+    elapsed_time = end_time - start_time
+    print("Detection completed in: " + str(elapsed_time.total_seconds()) + " seconds")
+
+    # create the response and send to client
+    image_encoded = cv2.imencode('.png', result_image)[1]
+    content_type = 'image/png'
+    content = np.array(image_encoded).tobytes()
+    response = Response(status=200, mimetype=content_type)
+    response.set_data(content)
+    return response
+
+# # handler function for processing HTTP POST requests containing multiple encoded images
+# # response will contain detection results in JSON
+# @api.route('/api/test_multiple_image_post', methods=['POST'])
+# def test_multiple_image_post():
+#     # convert string request data to uint8 and decode
+#     r = request
+#     nparr = np.frombuffer(r.data, np.uint8)
+#     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+#     # create the response and send to client
+#     response = {'message': 'image received. size={}x{}'.format(image.shape[1], image.shape[0])}
+#     response_pickled = jsonpickle.encode(response)
+#     return Response(response=response_pickled, status=200, mimetype="application/json")
+
+# draw bounding boxes
 def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_with_object_id=False, path=None,offset=(0, 0)):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
@@ -52,12 +287,11 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
             with open(path + '.txt', 'a') as f:
                 f.write(txt_str)
     return img
-#..............................................................................
 
-
+# original detection function
 def detect(save_img=False):
-    source, weights, view_img, save_txt, imgsz, trace, colored_trk, save_bbox_dim, save_with_object_id= opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace, opt.colored_trk, opt.save_bbox_dim, opt.save_with_object_id
-    save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
+    source, weights, view_img, save_txt, imgsz, trace, colored_trk, save_bbox_dim, save_with_object_id= arguments.source, arguments.weights, arguments.view_img, arguments.save_txt, arguments.img_size, not arguments.no_trace, arguments.colored_trk, arguments.save_bbox_dim, arguments.save_with_object_id
+    save_img = not arguments.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
 
@@ -85,12 +319,12 @@ def detect(save_img=False):
    
 
     # Directories
-    save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+    save_dir = Path(increment_path(Path(arguments.project) / arguments.name, exist_ok=arguments.exist_ok))  # increment run
     (save_dir / 'labels' if save_txt or save_with_object_id else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Initialize
     set_logging()
-    device = select_device(opt.device)
+    device = select_device(arguments.device)
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
@@ -99,7 +333,7 @@ def detect(save_img=False):
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
     if trace:
-        model = TracedModel(model, device, opt.img_size)
+        model = TracedModel(model, device, arguments.img_size)
 
     if half:
         model.half()  # to FP16
@@ -145,15 +379,15 @@ def detect(save_img=False):
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
             for i in range(3):
-                model(img, augment=opt.augment)[0]
+                model(img, augment=arguments.augment)[0]
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
+        pred = model(img, augment=arguments.augment)[0]
         t2 = time_synchronized()
 
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, arguments.conf_thres, arguments.iou_thres, classes=arguments.classes, agnostic=arguments.agnostic_nms)
         t3 = time_synchronized()
 
         # Apply Classifier
@@ -299,19 +533,31 @@ if __name__ == '__main__':
     parser.add_argument('--colored-trk', action='store_true', help='assign different color to every track')
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
-
+    parser.add_argument('--api', action='store_true', help='acquire images in REST API mode')
     parser.set_defaults(download=True)
-    opt = parser.parse_args()
-    print(opt)
-    #check_requirements(exclude=('pycocotools', 'thop'))
-    if opt.download and not os.path.exists(str(opt.weights)):
-        print('Model weights not found. Attempting to download now...')
+    
+
+    arguments = parser.parse_args()
+    print(arguments)
+
+    # download model weights if missing
+    if arguments.download and not os.path.exists(str(arguments.weights)):
+        print('INFO: Model weights not found, attempting download')
         download('./')
 
+    # launch the detection engine
     with torch.no_grad():
-        if opt.update:  # update all models (to fix SourceChangeWarning)
-            for opt.weights in ['yolov7.pt']:
+        if arguments.update:  
+            # update all models (to fix SourceChangeWarning)
+            for arguments.weights in ['yolov7.pt']:
                 detect()
-                strip_optimizer(opt.weights)
+                strip_optimizer(arguments.weights)
+        elif arguments.api:
+            # intialize the api
+            print("INFO: REST API mode activated, initializing API")
+            yolo = YOLOv7()
+            print("API initialization cpmplete")
+            api.run(host="0.0.0.0", port=5000)
         else:
+            # run in standard mode
             detect()
