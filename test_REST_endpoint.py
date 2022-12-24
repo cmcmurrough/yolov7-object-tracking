@@ -2,6 +2,8 @@ import requests
 import json
 import cv2
 import numpy as np
+import jsonpickle
+from flask import jsonify
 
 # function for sending an HTTP POST request containing a single encoded image
 # response will contain detection results in JSON
@@ -34,7 +36,7 @@ def test_single_image_post_endpoint(image, address, path):
 def test_multiple_image_post_endpoint(images, address, path):
     # prepare URL and headers for http request
     url = address + path
-    content_type = 'image/png'
+    content_type = 'application/json'
     headers = {'content-type': content_type}
     
     # send the HTTP post request with encoded image
@@ -43,7 +45,7 @@ def test_multiple_image_post_endpoint(images, address, path):
         image_encoded = cv2.imencode('.png', image)[1]
         images_encoded.append(image_encoded)
     try:
-        response = requests.post(url, data=np.array(images_encoded, dtype=object).tobytes(), headers=headers)
+        response = requests.post(url, data=jsonpickle.encode(images_encoded), headers=headers)
     except Exception as e:
         print("WARNING: exception occured while sending request: " + str(e))
         return None
@@ -89,23 +91,26 @@ def test_single_image_post_endpoint_with_response_image(image, address, path):
 
 # program entry point
 if __name__ == '__main__':
-    address = "http://10.0.0.205:5000"
+    address = "http://127.0.0.1:5000"
     
     # test the single image post request
-    image = cv2.imread('test.jpg')
+    print("TEST 1")
+    image = cv2.imread('test1.jpg')
     endpoint = "/api/test_single_image_post"
-    #json_response = test_single_image_post_endpoint(image, address, endpoint)
-    #print(json.dumps(json_response, indent=2))
+    json_response = test_single_image_post_endpoint(image, address, endpoint)
+    print(json.dumps(json_response, indent=2))
     
     # test the multiple image post request
-    image = cv2.imread('test.jpg')
+    print("TEST 2")
+    images = [cv2.imread('test1.jpg'), cv2.imread('test2.jpg'), cv2.imread('test3.jpg')]
     endpoint = "/api/test_multiple_image_post"
-    json_response = test_multiple_image_post_endpoint(image, address, endpoint)
+    json_response = test_multiple_image_post_endpoint(images, address, endpoint)
     print(json.dumps(json_response, indent=2))
     
     # test the single image post request with return image
-    image = cv2.imread('test.jpg')
+    print("TEST 3")
+    image = cv2.imread('test3.jpg')
     endpoint = "/api/detect_and_track_with_annotate"
-    #response_image = test_single_image_post_endpoint_with_response_image(image, address, endpoint)
-    #cv2.imshow("response image", response_image)
+    response_image = test_single_image_post_endpoint_with_response_image(image, address, endpoint)
+    cv2.imshow("response image", response_image)
     cv2.waitKey()
