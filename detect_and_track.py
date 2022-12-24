@@ -245,19 +245,32 @@ def detect_and_track_with_annotate():
     response.set_data(content)
     return response
 
-# # handler function for processing HTTP POST requests containing multiple encoded images
-# # response will contain detection results in JSON
-# @api.route('/api/test_multiple_image_post', methods=['POST'])
-# def test_multiple_image_post():
-#     # convert string request data to uint8 and decode
-#     r = request
-#     nparr = np.frombuffer(r.data, np.uint8)
-#     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+# handler function for processing HTTP POST requests containing multiple encoded images
+# response will contain detection results in JSON
+@api.route('/api/test_multiple_image_post', methods=['POST'])
+def test_multiple_image_post():
+    # convert string request data to uint8 and decode to image
+    images_encoded = np.frombuffer(request.data, np.uint8)
+    print(images_encoded.shape)
+    for image_encoded in images_encoded:
+        image = cv2.imdecode(image_encoded, cv2.IMREAD_COLOR)
+        cv2.imwrite("test.png", image)
 
-#     # create the response and send to client
-#     response = {'message': 'image received. size={}x{}'.format(image.shape[1], image.shape[0])}
-#     response_pickled = jsonpickle.encode(response)
-#     return Response(response=response_pickled, status=200, mimetype="application/json")
+    exit()
+
+
+
+    # run detection algorithm
+    print("Detection started at: UTC " + str(datetime.utcnow()))
+    start_time = datetime.now()
+    result_image, inferences_json = yolo.detect(arguments, image)
+    end_time = datetime.now()
+    elapsed_time = end_time - start_time
+    print("Detection completed in: " + str(elapsed_time.total_seconds()) + " seconds")
+
+    # create the response and send to client
+    response = {'processing_time': str(elapsed_time.total_seconds()), 'inferences': inferences_json}
+    return jsonify(response)
 
 # draw bounding boxes
 def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_with_object_id=False, path=None,offset=(0, 0)):
@@ -541,6 +554,7 @@ if __name__ == '__main__':
     print(arguments)
 
     # download model weights if missing
+    arguments.weights = arguments.weights[0]
     if arguments.download and not os.path.exists(str(arguments.weights)):
         print('INFO: Model weights not found, attempting download')
         download('./')
