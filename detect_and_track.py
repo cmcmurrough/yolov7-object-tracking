@@ -207,7 +207,7 @@ api = Flask(__name__)
 
 # handler function for processing HTTP POST requests containing a single encoded image
 # response will contain detection results in JSON
-@api.route('/api/test_single_image_post', methods=['POST'])
+@api.route('/api/detect_and_track_single', methods=['POST'])
 def test_single_image_post():
     # convert string request data to uint8 and decode to image
     image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
@@ -226,7 +226,7 @@ def test_single_image_post():
 
 # handler function for processing HTTP POST requests containing a single encoded image
 # response will contain detection results in a single encoded image
-@api.route('/api/detect_and_track_with_annotate', methods=['POST'])
+@api.route('/api/detect_track_annotate_single', methods=['POST'])
 def detect_and_track_with_annotate():
     # convert string request data to uint8 and decode to image
     image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
@@ -249,7 +249,7 @@ def detect_and_track_with_annotate():
 
 # handler function for processing HTTP POST requests containing multiple encoded images
 # response will contain detection results in JSON
-@api.route('/api/test_multiple_image_post', methods=['POST'])
+@api.route('/api/detect_and_track_multiple', methods=['POST'])
 def test_multiple_image_post():
     # decode the serialized array of images
     images_encoded = jsonpickle.decode(request.data)
