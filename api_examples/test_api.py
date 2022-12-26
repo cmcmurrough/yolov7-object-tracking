@@ -4,9 +4,7 @@ import cv2
 import numpy as np
 import jsonpickle
 from flask import jsonify
-from restfulYOLOv7 import request_detect_and_track_single
-from restfulYOLOv7 import request_detect_and_track_multiple
-from restfulYOLOv7 import request_detect_track_annotate_single
+from restfulYOLOv7 import request_detect_and_track_single, request_detect_and_track_multiple, request_detect_track_annotate_single
 
 # program entry point
 if __name__ == '__main__':
