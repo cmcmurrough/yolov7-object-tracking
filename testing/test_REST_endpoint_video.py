@@ -3,6 +3,7 @@ import json
 import cv2
 import numpy as np
 import jsonpickle
+import sys
 from flask import jsonify
 
 # function for sending an HTTP POST request containing a single encoded image
@@ -90,27 +91,60 @@ def test_single_image_post_endpoint_with_response_image(image, address, path):
 
 
 # program entry point
-if __name__ == '__main__':
-    address = "http://10.0.0.205:5000"
-    
-    # test the single image post request
-    print("TEST 1")
-    image = cv2.imread('test1.jpg')
-    endpoint = "/api/test_single_image_post"
-    json_response = test_single_image_post_endpoint(image, address, endpoint)
-    print(json.dumps(json_response, indent=2))
-    
-    # test the multiple image post request
-    print("TEST 2")
-    images = [cv2.imread('test1.jpg'), cv2.imread('test2.jpg'), cv2.imread('test3.jpg')]
-    endpoint = "/api/test_multiple_image_post"
-    json_response = test_multiple_image_post_endpoint(images, address, endpoint)
-    print(json.dumps(json_response, indent=2))
-    
-    # test the single image post request with return image
-    print("TEST 3")
-    image = cv2.imread('test3.jpg')
-    endpoint = "/api/detect_and_track_with_annotate"
-    response_image = test_single_image_post_endpoint_with_response_image(image, address, endpoint)
-    cv2.imshow("response image", response_image)
-    cv2.waitKey()
+if __name__ == "__main__":
+
+    # parse the command line arguments
+    print(sys.argv)
+    try:
+        video_source = sys.argv[1]
+        address = "http://10.0.0.205:5000"
+        display = False
+    except:
+        print("ERROR: unable to parse command line arguments")
+        print("USAGE: " + os.path.basename(sys.argv[0]) + " <video_path> <address>")
+        exit()
+
+    # open the video capture
+    try:
+        capture = cv2.VideoCapture(video_source)
+        capture_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        capture_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    except:
+        print("ERROR: unable to open video source " + video_source)
+        exit()
+
+    # begin polling loop
+    while(True):
+
+        # capture the video frame
+        success, frame = capture.read()
+
+        # downsample the frame
+        #scale = 0.5
+        #width = int(frame.shape[1] * scale)
+        #height = int(frame.shape[0] * scale)
+        #dim = (width, height)
+        #frame = cv2.resize(frame, dim, interpolation = cv2.INTER_AREA)
+
+        # check to see if we received a valid frame
+        if success:
+
+            t0 = cv2.getTickCount()
+            #response = test_single_image_post_endpoint_with_response_image(frame, address, "/api/detect_and_track_with_annotate")
+            response = test_single_image_post_endpoint(frame, address, "/api/test_single_image_post")
+            #print(response)
+            t1 = cv2.getTickCount()
+            time_elapsed = (t1 - t0) / cv2.getTickFrequency()
+            print("REST request completed in: " + str(time_elapsed) + " seconds")
+
+            # display the frame
+            if display:
+                cv2.imshow("result", response)
+
+            # check for 'q' key press
+            key = cv2.waitKey(1)
+            if key == ord('q'):
+                print("terminating program")
+                break
+        else:
+            print("WARNING: unable to retrieve frame")
