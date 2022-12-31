@@ -59,7 +59,7 @@ class YOLOv7:
 
         # create a random color list
         self.rand_color_list = []
-        for i in range(0,5005):
+        for i in range(0, 5005):
             r = randint(0, 255)
             g = randint(0, 255)
             b = randint(0, 255)
@@ -90,6 +90,12 @@ class YOLOv7:
         self.names = self.model.module.names if hasattr(self.model, 'module') else self.model.names
         self.colors = [[random.randint(0, 255) for _ in range(3)] for _ in self.names]
 
+        # intialize a few inference variables
+        if self.device.type != 'cpu':
+            self.model(torch.zeros(1, 3, self.imgsz, self.imgsz).to(self.device).type_as(next(self.model.parameters())))
+        self.old_img_w = self.old_img_h = self.imgsz
+        self.old_img_b = 1
+
     # generate a dataset object from a single input image
     def __make_dataset(self, arguments, image):
         img0 = image
@@ -104,16 +110,22 @@ class YOLOv7:
     # perform one cycle of inference, non-maxima supression, and SORT tracking
     def detect(self, arguments, image):
 
+        ##### WIP: trying to fix memory leak
+        #print("GPU memory allocated: " + str(torch.cuda.memory_allocated()))
+        #print("GPU memory allocated: " + str(torch.cuda.memory_reserved()))
+        #print("GPU memory state: " + str(torch.cuda.memory_summary()))
+        ##### END WIP
+
         # Run inference
-        if self.device.type != 'cpu':
-            self.model(torch.zeros(1, 3, self.imgsz, self.imgsz).to(self.device).type_as(next(self.model.parameters())))
-        old_img_w = old_img_h = self.imgsz
-        old_img_b = 1
+        #if self.device.type != 'cpu':
+        #    self.model(torch.zeros(1, 3, self.imgsz, self.imgsz).to(self.device).type_as(next(self.model.parameters())))
+        #old_img_w = old_img_h = self.imgsz
+        #old_img_b = 1
 
         # create a dataset from the input image
         self.dataset = self.__make_dataset(arguments, image)
         mode = "image"
-
+        
         # process each image in the dataset
         for path, img, im0s, vid_cap, in self.dataset:
             img = torch.from_numpy(img).to(self.device)
@@ -123,10 +135,11 @@ class YOLOv7:
                 img = img.unsqueeze(0)
 
             # warmup
-            if self.device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
-                old_img_b = img.shape[0]
-                old_img_h = img.shape[2]
-                old_img_w = img.shape[3]
+            if self.device.type != 'cpu' and (self.old_img_b != img.shape[0] or self.old_img_h != img.shape[2] or self.old_img_w != img.shape[3]):
+                print("TEST")
+                self.old_img_b = img.shape[0]
+                self.old_img_h = img.shape[2]
+                self.old_img_w = img.shape[3]
                 for i in range(3):
                     self.model(img, augment=arguments.augment)[0]
 
@@ -193,6 +206,11 @@ class YOLOv7:
             label = str(id) + ":" + class_name
             inference = {'x1': int(x1), 'y1': int(y1), 'x2': int(x2), 'y2': int(y2), 'cx': int(centroid[0]), 'cy': int(centroid[1]), 'class_id': int(class_id), 'class_name': class_name, 'instance_id': int(id), 'label': label}
             inferences.append(inference)
+
+        ###### WIP: fixing memory leak
+        del img, pred, self.dataset, dets_to_sort
+        torch.cuda.empty_cache()
+        ###### END WIP
 
         # return the resulta
         result_image = im0
