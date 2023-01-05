@@ -24,11 +24,7 @@ def process_frame(frame, yolo):
             
     # run the YOLO iteration
     try:
-        t0 = cv2.getTickCount()
         result_image, inferences = yolo.detect(arguments, frame, False)
-        t1 = cv2.getTickCount()
-        time_elapsed = (t1 - t0) / cv2.getTickFrequency()
-        print("YOLO inference completed in: " + str(time_elapsed) + " seconds")
         if not inferences:
             raise Exception("request returned invalid response")
     except Exception as e:
@@ -135,9 +131,13 @@ if __name__ == '__main__':
             # capture the video frame
             success, frame = capture.read()
             if success:
+
                 # perform the inference
+                t0 = cv2.getTickCount()
                 annotated_frame = process_frame(frame, yolo)
-                #print(torch.cuda.memory_summary())
+                t1 = cv2.getTickCount()
+                time_elapsed = (t1 - t0) / cv2.getTickFrequency()
+                print("YOLO inference completed in: " + str(time_elapsed) + " seconds")
 
                 # display the frame and write to video
                 if display:
@@ -155,8 +155,6 @@ if __name__ == '__main__':
                 print("WARNING: unable to retrieve frame")
                 processing = False
                 break
-                #print("WARNING: restarting video stream")
-                #capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
         # close streams and save results
         capture.release()
