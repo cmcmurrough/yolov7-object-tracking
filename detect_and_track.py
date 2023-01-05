@@ -29,7 +29,7 @@ from utils.datasets import letterbox
 # wrapper class for YOLOv7 object tracking implementation by RizwanMunawar
 # original repository: https://github.com/RizwanMunawar/yolov7-object-tracking
 class YOLOv7:
-    def __init__(self):
+    def __init__(self, arguments):
         self.source = arguments.source
         self.weights = arguments.weights
         self.view_img = arguments.view_img
@@ -108,7 +108,7 @@ class YOLOv7:
 
 
     # perform one cycle of inference, non-maxima supression, and SORT tracking
-    def detect(self, arguments, image):
+    def detect(self, arguments, image, draw_annotations=True):
 
         ##### WIP: trying to fix memory leak
         #print("GPU memory allocated: " + str(torch.cuda.memory_allocated()))
@@ -136,7 +136,6 @@ class YOLOv7:
 
             # warmup
             if self.device.type != 'cpu' and (self.old_img_b != img.shape[0] or self.old_img_h != img.shape[2] or self.old_img_w != img.shape[3]):
-                print("TEST")
                 self.old_img_b = img.shape[0]
                 self.old_img_h = img.shape[2]
                 self.old_img_w = img.shape[3]
@@ -168,32 +167,34 @@ class YOLOv7:
                     tracks = self.sort_tracker.getTrackers()
 
                     # annotate tracking results
-                    for track in tracks:
-                        if self.colored_trk:
-                            # draw multicolored tracks
-                            [cv2.line(im0, (int(track.centroidarr[i][0]),
-                                        int(track.centroidarr[i][1])), 
-                                        (int(track.centroidarr[i + 1][0]),
-                                        int(track.centroidarr[i + 1][1])),
-                                        self.rand_color_list[track.id], thickness=2) 
-                                        for i, _ in  enumerate(track.centroidarr) 
-                                        if i < len(track.centroidarr)-1 ] 
-                        else:
-                            # draw unicolor tracks
-                            [cv2.line(im0, (int(track.centroidarr[i][0]),
-                                        int(track.centroidarr[i][1])), 
-                                        (int(track.centroidarr[i + 1][0]),
-                                        int(track.centroidarr[i + 1][1])),
-                                        (255,0,0), thickness=2) 
-                                        for i, _ in  enumerate(track.centroidarr) 
-                                        if i < len(track.centroidarr)-1 ] 
+                    if draw_annotations:
+                        for track in tracks:
+                            if self.colored_trk:
+                                # draw multicolored tracks
+                                [cv2.line(im0, (int(track.centroidarr[i][0]),
+                                            int(track.centroidarr[i][1])), 
+                                            (int(track.centroidarr[i + 1][0]),
+                                            int(track.centroidarr[i + 1][1])),
+                                            self.rand_color_list[track.id], thickness=2) 
+                                            for i, _ in  enumerate(track.centroidarr) 
+                                            if i < len(track.centroidarr)-1 ] 
+                            else:
+                                # draw unicolor tracks
+                                [cv2.line(im0, (int(track.centroidarr[i][0]),
+                                            int(track.centroidarr[i][1])), 
+                                            (int(track.centroidarr[i + 1][0]),
+                                            int(track.centroidarr[i + 1][1])),
+                                            (255,0,0), thickness=2) 
+                                            for i, _ in  enumerate(track.centroidarr) 
+                                            if i < len(track.centroidarr)-1 ] 
 
                     # draw boxes for visualization
                     if len(tracked_dets) > 0:
                         bbox_xyxy = tracked_dets[:, :4]
                         identities = tracked_dets[:, 8]
                         categories = tracked_dets[:, 4]
-                        draw_boxes(im0, bbox_xyxy, identities, categories, self.names, self.save_with_object_id)
+                        if draw_annotations:
+                            draw_boxes(im0, bbox_xyxy, identities, categories, self.names, self.save_with_object_id)
 
         # generate result json
         inferences = []
@@ -212,7 +213,7 @@ class YOLOv7:
         torch.cuda.empty_cache()
         ###### END WIP
 
-        # return the resulta
+        # return the results
         result_image = im0
         return result_image, inferences
 
@@ -541,6 +542,7 @@ def detect(save_img=False):
     print(f'Done. ({time.time() - t0:.3f}s)')
 
 
+# program entry point
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
@@ -589,7 +591,7 @@ if __name__ == '__main__':
         elif arguments.api:
             # intialize the api
             print("INFO: REST API mode activated, initializing API")
-            yolo = YOLOv7()
+            yolo = YOLOv7(arguments)
             print("API initialization cpmplete")
             api.run(host="0.0.0.0", port=5000)
         else:
