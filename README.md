@@ -8,7 +8,7 @@
 ### Running fork
 - Follow original repository installation instructions below.
 - Include the flag "api-mode" to execute in API mode. The api_examples folder contains examples for api_mode (one shot REST requests and streaming video), and library mode
-- import "detect_and_track" to include the YOLOv7 class in other python programs (see test_lib.py for example)
+- Import "detect_and_track" to include the YOLOv7 class in other python programs (see test_lib.py for example)
 
 -------------------------------------------------------------------------------------------------------
 
