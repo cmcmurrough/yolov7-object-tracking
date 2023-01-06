@@ -1,4 +1,16 @@
-# yolov7-object-tracking
+# RESTful yolov7-object-tracking
+
+### About RESTful YOLOv7 
+- Fork of original repository https://github.com/RizwanMunawar/yolov7-object-tracking.git
+- Adds "API mode", which supports REST requests via HTTP
+- Adds "library mode", which allows including the encapsulated YOLOv7 class into other python programs
+
+### Running fork
+- Follow original repository installation instructions below.
+- Include the flag "api-mode" to execute in API mode. The api_examples folder contains examples for api_mode (one shot REST requests and streaming video), and library mode
+- import "detect_and_track" to include the YOLOv7 class in other python programs (see test_lib.py for example)
+
+-------------------------------------------------------------------------------------------------------
 
 ### New Features
 - Added Label for Every Track
