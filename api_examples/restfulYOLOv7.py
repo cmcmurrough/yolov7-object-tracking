@@ -31,6 +31,32 @@ def request_detect_and_track_single(image, address, path="/api/detect_and_track_
         print("WARNING: exception occured while parsing response: " + str(e))
         return None   
 
+# function for sending an HTTP POST request containing a single encoded image
+# response will contain detection results in JSON
+def request_detect_single(image, address, path="/api/detect_single"):
+    # prepare URL and headers for http request
+    url = address + path
+    content_type = 'image/png'
+    headers = {'content-type': content_type}
+
+    # send the HTTP post request with encoded image attached
+    image_encoded = cv2.imencode('.png', image)[1]
+    try:
+        response = requests.post(url, data=np.array(image_encoded).tobytes(), headers=headers)
+    except Exception as e:
+        print("WARNING: exception occured while sending request: " + str(e))
+        return None
+
+    # return the response JSON    
+    try:
+        status = response.status_code
+        if status != 200:
+            raise Exception("Received unexpected HTTP status code " + str(status))
+        return json.loads(response.text)
+    except Exception as e:
+        print("WARNING: exception occured while parsing response: " + str(e))
+        return None  
+
 # function for sending an HTTP POST request containing multiple encoded images
 # response will contain detection results in JSON
 def request_detect_and_track_multiple(images, address, path="/api/detect_and_track_multiple"):

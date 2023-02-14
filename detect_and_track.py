@@ -108,7 +108,7 @@ class YOLOv7:
 
 
     # perform one cycle of inference, non-maxima supression, and SORT tracking
-    def detect(self, arguments, image, draw_annotations=True):
+    def detect_and_track(self, arguments, image, draw_annotations=True):
 
         ##### WIP: trying to fix memory leak
         #print("GPU memory allocated: " + str(torch.cuda.memory_allocated()))
@@ -127,6 +127,7 @@ class YOLOv7:
         mode = "image"
         
         # process each image in the dataset
+        inferences = []
         for path, img, im0s, vid_cap, in self.dataset:
             img = torch.from_numpy(img).to(self.device)
             img = img.half() if self.half else img.float()  # uint8 to fp16/32
@@ -195,18 +196,21 @@ class YOLOv7:
                         categories = tracked_dets[:, 4]
                         if draw_annotations:
                             draw_boxes(im0, bbox_xyxy, identities, categories, self.names, self.save_with_object_id)
+                    else:
+                        bbox_xyxy = []
+                        identities = []
+                        categories = []
 
-        # generate result json
-        inferences = []
-        for i, box in enumerate(bbox_xyxy):
-            x1, y1, x2, y2 = [int(i) for i in box]
-            id = int(identities[i]) if identities is not None else 0
-            class_id = int(categories[i]) if categories is not None else 0
-            class_name = self.names[class_id]
-            centroid = (int((box[0] + box[2]) / 2), (int((box[1] + box[3]) / 2)))
-            label = str(id) + ":" + class_name
-            inference = {'x1': int(x1), 'y1': int(y1), 'x2': int(x2), 'y2': int(y2), 'cx': int(centroid[0]), 'cy': int(centroid[1]), 'class_id': int(class_id), 'class_name': class_name, 'instance_id': int(id), 'label': label}
-            inferences.append(inference)
+                    # generate result json
+                    for i, box in enumerate(bbox_xyxy):
+                        x1, y1, x2, y2 = [int(i) for i in box]
+                        id = int(identities[i]) if identities is not None else 0
+                        class_id = int(categories[i]) if categories is not None else 0
+                        class_name = self.names[class_id]
+                        centroid = (int((box[0] + box[2]) / 2), (int((box[1] + box[3]) / 2)))
+                        label = str(id) + ":" + class_name
+                        inference = {'x1': int(x1), 'y1': int(y1), 'x2': int(x2), 'y2': int(y2), 'cx': int(centroid[0]), 'cy': int(centroid[1]), 'class_id': int(class_id), 'class_name': class_name, 'instance_id': int(id), 'label': label}
+                        inferences.append(inference)
 
         ###### WIP: fixing memory leak
         del img, pred, self.dataset, dets_to_sort
@@ -218,6 +222,72 @@ class YOLOv7:
         return result_image, inferences
 
 
+    # perform one cycle of inference
+    def detect(self, arguments, image, draw_annotations=True):
+
+        # create a dataset from the input image
+        self.dataset = self.__make_dataset(arguments, image)
+        mode = "image"
+        
+        # process each image in the dataset
+        inferences = []
+        for path, img, im0s, vid_cap, in self.dataset:
+            img = torch.from_numpy(img).to(self.device)
+            img = img.half() if self.half else img.float()  # uint8 to fp16/32
+            img /= 255.0  # 0 - 255 to 0.0 - 1.0
+            if img.ndimension() == 3:
+                img = img.unsqueeze(0)
+
+            # warmup
+            if self.device.type != 'cpu' and (self.old_img_b != img.shape[0] or self.old_img_h != img.shape[2] or self.old_img_w != img.shape[3]):
+                self.old_img_b = img.shape[0]
+                self.old_img_h = img.shape[2]
+                self.old_img_w = img.shape[3]
+                for i in range(3):
+                    self.model(img, augment=arguments.augment)[0]
+
+            # perform the inference
+            pred = self.model(img, augment=arguments.augment)[0]
+
+            # apply NMS
+            pred = non_max_suppression(pred, arguments.conf_thres, arguments.iou_thres, classes=arguments.classes, agnostic=arguments.agnostic_nms)
+
+            # apply classifier
+            if self.classify:
+                pred = apply_classifier(pred, self.modelc, img, im0s)
+
+            # process detections
+            for i, det in enumerate(pred):  # detections per image
+                im0 = im0s
+                if len(det):
+                    # rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                    
+                    # run SORT
+                    dets_to_sort = np.empty((0,6))
+                    for x1, y1, x2, y2, conf, detclass in det.cpu().detach().numpy():
+                        dets_to_sort = np.vstack((dets_to_sort, np.array([x1, y1, x2, y2, conf, detclass])))
+
+                    # generate result json
+                    for i, box in enumerate(dets_to_sort):
+                        print(box)
+                        x1, y1, x2, y2, confidence, class_id = [int(i) for i in box]
+                        id = 0
+                        class_name = self.names[class_id]
+                        centroid = (int((box[0] + box[2]) / 2), (int((box[1] + box[3]) / 2)))
+                        label = str(id) + ":" + class_name
+                        inference = {'x1': int(x1), 'y1': int(y1), 'x2': int(x2), 'y2': int(y2), 'cx': int(centroid[0]), 'cy': int(centroid[1]), 'class_id': int(class_id), 'class_name': class_name, 'instance_id': int(id), 'label': label}
+                        inferences.append(inference)
+
+        ###### WIP: fixing memory leak
+        del img, pred, self.dataset, dets_to_sort
+        torch.cuda.empty_cache()
+        ###### END WIP
+
+        # return the results
+        result_image = im0
+        return result_image, inferences
+
 # imports for RESTful server API
 from flask import Flask, request, Response, jsonify
 import jsonpickle
@@ -227,7 +297,26 @@ api = Flask(__name__)
 # handler function for processing HTTP POST requests containing a single encoded image
 # response will contain detection results in JSON
 @api.route('/api/detect_and_track_single', methods=['POST'])
-def test_single_image_post():
+def detect_and_track_single():
+    # convert string request data to uint8 and decode to image
+    image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
+
+    # run detection algorithm
+    print("Detection started at: UTC " + str(datetime.utcnow()))
+    start_time = datetime.now()
+    result_image, result_json = yolo.detect_and_track(arguments, image)
+    end_time = datetime.now()
+    elapsed_time = end_time - start_time
+    print("Detection completed in: " + str(elapsed_time.total_seconds()) + " seconds")
+
+    # create the response and send to client
+    response = {'processing_time': str(elapsed_time.total_seconds()), 'inferences': result_json}
+    return jsonify(response)
+
+# handler function for processing HTTP POST requests containing a single encoded image
+# response will contain detection results in JSON
+@api.route('/api/detect_single', methods=['POST'])
+def detect_single():
     # convert string request data to uint8 and decode to image
     image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
 
@@ -246,14 +335,14 @@ def test_single_image_post():
 # handler function for processing HTTP POST requests containing a single encoded image
 # response will contain detection results in a single encoded image
 @api.route('/api/detect_track_annotate_single', methods=['POST'])
-def detect_and_track_with_annotate():
+def detect_track_annotate_single():
     # convert string request data to uint8 and decode to image
     image = cv2.imdecode(np.frombuffer(request.data, np.uint8), cv2.IMREAD_COLOR)
 
     # run detection algorithm
     print("Detection started at: UTC " + str(datetime.utcnow()))
     start_time = datetime.now()
-    result_image, result_json = yolo.detect(arguments, image)
+    result_image, result_json = yolo.detect_and_track(arguments, image)
     end_time = datetime.now()
     elapsed_time = end_time - start_time
     print("Detection completed in: " + str(elapsed_time.total_seconds()) + " seconds")
@@ -269,7 +358,7 @@ def detect_and_track_with_annotate():
 # handler function for processing HTTP POST requests containing multiple encoded images
 # response will contain detection results in JSON
 @api.route('/api/detect_and_track_multiple', methods=['POST'])
-def test_multiple_image_post():
+def detect_and_track_multiple():
     # decode the serialized array of images
     images_encoded = jsonpickle.decode(request.data)
     images = []
@@ -282,7 +371,7 @@ def test_multiple_image_post():
     result_images = []
     result_jsons = []
     for i, image in enumerate(images):
-        result_image, result_json = yolo.detect(arguments, image)
+        result_image, result_json = yolo.detect_and_track(arguments, image)
         result_images.append(result_image)
         result_jsons.append(result_json)
     end_time = datetime.now()

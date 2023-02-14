@@ -14,7 +14,7 @@ if __name__ == "__main__":
     print(sys.argv)
     try:
         video_source = sys.argv[1]
-        address = "http://10.0.0.205:5000"
+        address = "http://10.0.0.204:5000"
         display = True
         save_video = True
     except:

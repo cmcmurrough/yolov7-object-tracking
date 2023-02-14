@@ -8,7 +8,7 @@ from restfulYOLOv7 import request_detect_and_track_single, request_detect_and_tr
 
 # program entry point
 if __name__ == '__main__':
-    address = "http://10.0.0.205:5000"
+    address = "http://10.0.0.204:5000"
     
     # test the single image post request
     print("TEST 1: /api/detect_and_track_single")
