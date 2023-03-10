@@ -280,7 +280,10 @@ class YOLOv7:
                         inferences.append(inference)
 
         ###### WIP: fixing memory leak
-        del img, pred, self.dataset, dets_to_sort
+        try:
+            del img, pred, self.dataset, dets_to_sort
+        except:
+            print("WARNING: Unable to delete CUDA object")
         torch.cuda.empty_cache()
         ###### END WIP
 

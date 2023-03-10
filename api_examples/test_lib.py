@@ -31,8 +31,6 @@ def process_frame(frame, yolo):
     except Exception as e:
         print("WARNING: exception occured while running YOLO inference: " + str(e))
         traceback.print_exc()
-        exit()
-        return None
 
     # annotate the video with JSON results
     image_out = frame.copy()
@@ -110,13 +108,14 @@ if __name__ == '__main__':
         capture_fps = capture.get(cv2.CAP_PROP_FPS)
         display = False
         save_video = True
+        save_video_path = os.path.basename(video_source).replace(".mp4", ".processed.mp4")
     except:
         print("ERROR: unable to open video source " + video_source)
         exit()
 
     # open the output video writer
     if save_video:
-        video_writer = cv2.VideoWriter("out.mp4", cv2.VideoWriter_fourcc(*'mp4v'), capture_fps, (capture_width, capture_height))
+        video_writer = cv2.VideoWriter(save_video_path, cv2.VideoWriter_fourcc(*'mp4v'), capture_fps, (capture_width, capture_height))
 
     # launch the detection engine
     with torch.no_grad():

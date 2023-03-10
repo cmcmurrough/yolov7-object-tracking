@@ -1,6 +1,6 @@
-train: dataset_20220614T115037_c8d5192c-12b0-4dd7-8826-97115ec964b7_v000_yolov7/train/images
-val: dataset_20220614T115037_c8d5192c-12b0-4dd7-8826-97115ec964b7_v000_yolov7/valid/images
-nc: 15
+train: dataset_20230120T170434_c2a81982-4c0e-4e5b-9aa0-9b7bc6485bd4_v000_yolov7/train/images
+val: dataset_20230120T170434_c2a81982-4c0e-4e5b-9aa0-9b7bc6485bd4_v000_yolov7/valid/images
+nc: 16
 names: [handsfree_qr_code_scanner, order_item_face, hand, box, unassembled_box, poly_mailer,
   dunnage, shipping_label, handheld_tape_dispenser, tote, tape, paper, phone, box_cutter,
-  order_item]
+  order_item, order_item_face_varied]
